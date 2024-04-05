@@ -93,8 +93,7 @@ static struct Page* default_alloc_pages(size_t n) {
 
 First-Fit物理页释放，需要考虑内存碎片的问题，合并连续的空闲物理块
 ```
-static void
-default_free_pages(struct Page *base, size_t n) {
+static void default_free_pages(struct Page *base, size_t n) {
     assert(n > 0);
     assert(PageReserved(base));
 
