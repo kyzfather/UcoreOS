@@ -181,7 +181,62 @@ struct Page* get_page(pde_t *pgdir, uintptr_t la) {
     return NULL;
 }
 ```
+目前建立了页式映射机制，有了内存地址的虚拟化，这样就可以通过设置页表项来限定软件运行时的访问空间，确保软件运行不越界，完成虚拟内存的功能之一：内存访问保护的功能。<br>
+接下来需要实现页的换入换出机制，从而实现虚拟内存的功能之二：提供一个好像有虚拟地址大小空间内存的抽象。<br>
 
+
+实现完成基于FIFO的页面替换算法：
+```
+static int _fifo_map_swappable(struct mm_struct *mm, uintptr_t addr, struct Page *page, int swap_in) //添加到FIFO队列尾 {
+    list_entry_t *head = (list_entry_t*) mm->sm_priv; //获取FIFO队列链表头
+    list_entry_t *entry = &(page->pra_page_link); //获取当前物理页的链表节点
+ 
+    assert(entry != NULL && head != NULL);
+    list_add(head, entry); //将最新分配到达的物理页插入到FIFO队列尾部
+    return 0;
+}
+
+static int _fifo_swap_out_victim(struct mm_struct *mm, struct Page ** ptr_page, int in_tick) //从FIFO队列头取出victim页 {
+    list_entry_t *head=(list_entry_t*) mm->sm_priv;
+    assert(head != NULL);
+    list_entry_t *le = head->prev; //FIFO队列头部
+    assert(head!=le);
+    struct Page *p = le2page(le, pra_page_link);
+    list_del(le); //找到FIFO队列头部的链表，移除，设置victim需要换出到磁盘的页
+    assert(p !=NULL);
+    *ptr_page = p;
+    return 0;
+}
+```
+
+受害者页换出到磁盘（当申请分配物理页时发现没有空闲物理页，会进行物理页的换出）：
+```
+int swap_out(struct mm_struct *mm, int n, int in_tick) {
+     int i;
+     for (i = 0; i != n; ++ i) {
+          uintptr_t v;
+          struct Page *page;
+          int r = sm->swap_out_victim(mm, &page, in_tick); //从FIFO队列找到受害者页，地址放到page中
+          
+          v = page->pra_vaddr; 
+          pte_t *ptep = get_pte(mm->pgdir, v, 0);
+          assert((*ptep & PTE_P) != 0);
+
+          if (swapfs_write((page->pra_vaddr / PGSIZE + 1) << 8, page) != 0) { //受害者页换出到磁盘
+               cprintf("SWAP: failed to save\n");
+               sm->map_swappable(mm, v, page, 0);
+               continue;
+          }
+          else {
+               cprintf("swap_out: i %d, store page in vaddr 0x%x to disk swap entry %d\n", i, v, page->pra_vaddr / PGSIZE + 1);
+               *ptep = (page->pra_vaddr / PGSIZE + 1) << 8; //修改页表项内容，低24位表示磁盘上该物理页换出的地址
+               free_page(page); //释放该物理页
+          }
+          tlb_invalidate(mm->pgdir, v); //刷新tlb
+     }
+     return i;
+}
+```
 
 
 
