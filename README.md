@@ -243,6 +243,28 @@ int swap_out(struct mm_struct *mm, int n, int in_tick) {
 
 
 ## 进程管理
+到目前为止，整个CPU都是一条线的串行执行，还不能做到多个程序的并发执行。所以需要设计实现进程控制块，将一个程序的执行流程抽象出来，这样就可以实现多程序的并发运行。<br>
+
+进程控制块设计：
+```
+struct proc_struct {
+    enum proc_state state;      // 进程状态
+    int pid;                    // 进程id
+    uintptr_t kstack;           // 内核栈
+    volatile bool need_resched; // 是否需要调度标记
+    struct proc_struct *parent; // 父进程的进程控制块指针
+    struct mm_struct *mm;       // 进程的有效地址空间（用户进程才有这个）
+    struct context context;     // 进程切换的上下文信息（保存运行时的寄存器值）
+    struct trapframe *tf;                        
+    uintptr_t cr3;              // CR3寄存器，标记该进程的页目录表的虚拟地址
+    uint32_t flags;                             
+    char name[PROC_NAME_LEN + 1];               
+    uint32_t wait_state;                        
+    struct run_queue *rq;       // CPU的就绪队列
+    list_entry_t run_link;      // 就绪队列的节点
+    int time_slice;             // 时间片，用于实现round robin调度
+};
+```
 
 
 
