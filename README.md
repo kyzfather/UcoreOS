@@ -142,4 +142,60 @@ static void default_free_pages(struct Page *base, size_t n) {
     nr_free += n;
     return;
 }
+
+## 虚拟内存管理
+目前已经完成了对物理页的管理，接下来需要开启页式映射机制，并且通过实现缺页异常的处理，给用户程序提供一个好像有磁盘空间大小的内存空间的假象。<br>
+
+在Ucore中，建立了二级页表映射关系，包括页目录表和页表。以线性地址的高10位来检索页目录表得到页表的起始地址，之后根据线性地址的中间10位来检索页表得到物理页的地址，页目录项和页表项内容定义如下：<br>
+● 页目录项内容 = (页表起始物理地址 & ~0x0FFF) | PTE_U | PTE_W | PTE_P<br>
+● 页表项内容 = (pa & ~0x0FFF) | PTE_P | PTE_W <br>
+PTE_U代表用户态可以读取对应的物理页内容，PTE_W表示物理页内容可写，PTE_P表示物理页存在。
+
+
+实现根据虚拟地址，找到相应的页表项函数get_pte:
+```
+pte_t* get_pte(pde_t *pgdir, uintptr_t la, bool create) { //pgdir代表页目录项的虚拟地址，la代表虚拟地址，返回页表项的虚拟地址
+    pde_t *pdep = &pgdir[PDX(la)]; //首先检索页目录表，找到页目录项
+    if (!(*pdep & PTE_P)) { //如果对应的页表还没有创建，需要创建
+        struct Page *page;
+        if (!create || (page = alloc_page()) == NULL) { //创建页表，分配物理页
+            return NULL;
+        }
+        set_page_ref(page, 1);
+        uintptr_t pa = page2pa(page);
+        memset(KADDR(pa), 0, PGSIZE);
+        *pdep = pa | PTE_U | PTE_W | PTE_P; //设置页目录项内容
+    }
+    return &((pte_t *)KADDR(PDE_ADDR(*pdep)))[PTX(la)]; //返回页表中的页表项地址
+}
+```
+
+实现根据虚拟地址，通过页式映射找到对应的物理页函数get_page:
+```
+struct Page* get_page(pde_t *pgdir, uintptr_t la) {
+    pte_t *ptep = get_pte(pgdir, la, 0); //调用get_pte找到页表项
+    if (ptep != NULL && *ptep & PTE_P) { //判断物理页是否存在
+        return pte2page(*ptep); //根据页表项内容，找到相应的物理页
+    }
+    return NULL;
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ```
