@@ -528,7 +528,9 @@ static __noinline uint32_t __down(semaphore_t *sem, uint32_t wait_state) {
     return 0;
 }
 ```
-
+## To-Do:
+1. 文件系统的实现。
+2. 伙伴系统实现减少内存碎片
 
 
 
