@@ -466,7 +466,10 @@ typedef struct {
     wait_queue_t wait_queue;
 } semaphore_t;
 ```
-每个信号量都有一个专门的等待队列，还有一个value。当value > 0，表示当前可用资源数量。 value = 0，表示等待队列为空。 value < 0，表示该信号量的等待队列里的进程数。
+每个信号量都有一个专门的等待队列，还有一个value。
+1. 当value > 0，表示当前可用资源数量。 
+2. value = 0，表示等待队列为空。 
+3. value < 0，表示该信号量的等待队列里的进程数。
 
 等待队列的相关定义：
 ```
