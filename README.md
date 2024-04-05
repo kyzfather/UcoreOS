@@ -213,7 +213,7 @@ static int _fifo_swap_out_victim(struct mm_struct *mm, struct Page ** ptr_page, 
 ```
 int swap_out(struct mm_struct *mm, int n, int in_tick) {
      int i;
-     for (i = 0; i != n; ++ i) {
+     for (i = 0; i != n; i++) {
           uintptr_t v;
           struct Page *page;
           int r = sm->swap_out_victim(mm, &page, in_tick); //从FIFO队列找到受害者页，地址放到page中
