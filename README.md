@@ -142,6 +142,7 @@ static void default_free_pages(struct Page *base, size_t n) {
     nr_free += n;
     return;
 }
+```
 
 ## 虚拟内存管理
 目前已经完成了对物理页的管理，接下来需要开启页式映射机制，并且通过实现缺页异常的处理，给用户程序提供一个好像有磁盘空间大小的内存空间的假象。<br>
