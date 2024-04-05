@@ -45,6 +45,7 @@ struct Page {
     uint32_t flags; // 页的状态
     unsigned int property;// 用于first-fit物理页分配,标志当前空闲块包含的物理页数目
     list_entry_t page_link;//链表节点，用于将Page链接到一个双向链表中
+    list_entry_t pra_page_link;  //链表节点，用于页面置换算法，将最新分配的物理页放到FIFO队列尾
 };
 ```
 
