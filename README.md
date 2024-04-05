@@ -44,6 +44,103 @@ struct Page {
     int ref;        // 当前物理页被多少虚拟地址引用
     uint32_t flags; // 页的状态
     unsigned int property;// 用于first-fit物理页分配,标志当前空闲块包含的物理页数目
-    list_entry_t page_link;//链表节点，使用双向链表管理空闲物理页
+    list_entry_t page_link;//链表节点，用于将Page链接到一个双向链表中
 };
+```
+
+双向链表来链接管理所有的空闲页
+```
+typedef struct {
+            list_entry_t free_list;                        
+            unsigned int nr_free; //链表上空闲页的数目                             
+} free_area_t;
+```
+
+First-Fit物理页分配算法实现，物理页的分配：
+```
+static struct Page* default_alloc_pages(size_t n) {
+    assert(n > 0);
+    if (n > nr_free) {
+        return NULL;
+    }
+    list_entry_t *le, *len;
+    le = &free_list; //获取双向链表的头节点
+
+    while ((le = list_next(le)) != &free_list) {
+        struct Page *p = le2page(le, page_link);
+        if (p->property >= n) { //查看当前空闲物理块是否满足需求，如果满足就分配
+            int i;
+            for (i = 0; i < n; i++) {
+                len = list_next(le);
+                struct Page *pp = le2page(le, page_link);
+                SetPageReserved(pp); //设置物理页状态为已分配
+                ClearPageProperty(pp);
+                list_del(le); //从链表上移除
+                le = len;
+            }
+            if (p->property > n) { //更改空闲物理块的空闲物理页数目
+                (le2page(le, page_link))->property = p->property - n;
+            }
+            ClearPageProperty(p);
+            SetPageReserved(p);
+            nr_free -= n;
+            return p; //返回结果
+        }
+    }
+    return NULL;
+}
+```
+
+First-Fit物理页释放，需要考虑内存碎片的问题，合并连续的空闲物理块
+```
+static void
+default_free_pages(struct Page *base, size_t n) {
+    assert(n > 0);
+    assert(PageReserved(base));
+
+    list_entry_t *le = &free_list;
+    struct Page *p;
+    while ((le = list_next(le)) != &free_list) {
+        p = le2page(le, page_link);
+        if (p > base) { // 找到第一个地址大于base的位置处
+            break;
+        }
+    }
+
+    for (p = base; p < base + n; p++) { //将释放的物理页插入到链表中
+        list_add_before(le, &(p->page_link));
+    }
+
+    // 更改物理页状态：未分配，引用为0
+    base->flags = 0;
+    set_page_ref(base, 0);
+    ClearPageProperty(base); 
+    SetPageProperty(base);
+    base->property = n;
+
+    // 查看是否能合并后面的物理块
+    p = le2page(le, page_link);
+    if (base + n == p) { // base + n == p，说明后面有连续的物理块
+        base->property += p->property;
+        p->property = 0;
+    }
+
+    // 查看是否能合并前面的物理块
+    le = list_prev(&(base->page_link));
+    p = le2page(le, page_link);
+    if (le != &free_list && p == base - 1) { //p == base，说明前面有连续的物理块
+        while (le != &free_list) {
+            if (p->property) {
+                p->property += base->property;
+                base->property = 0;
+                break;
+            }
+            le = list_prev(le);
+            p = le2page(le, page_link);
+        }
+    }
+
+    nr_free += n;
+    return;
+}
 ```
