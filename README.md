@@ -390,7 +390,63 @@ bad_fork_cleanup_proc:
 3. 设置进程控制块的trapframe中的段选择子为USER_CS，执行该进程时会将段选择子放入到CS段寄存器中。CS低两位代表CPU的权限级别，这里为用户进程分配的权限级别为3的用户级。
 
 
+## 进程调度
+目前Ucore已经实现了物理内存、虚存的管理，并且抽象出了进程线程的概念，可以创建出用户进程和内核线程。之后，需要完成CPU调度执行不同的进程。<br>
 
+什么时候会发生进程的调度和切换呢？这里列举Ucore中可能发生进程调度的时机：<br>
+1. 用户进程调用了do_exit释放资源
+2. 用户进程调用了do_wait系统调用
+3. 时钟中断或者系统调用进入内核态，检查进程控制块的时间片和need_scheduled标志
+   
+Round-Robin时间片调度实现。就绪队列定义：
+```
+struct run_queue {
+    list_entry_t run_list; //双向链表，链表头
+    unsigned int proc_num; //就绪队列上的进程数
+    int max_time_slice;
+};
+```
+
+入队和出队的实现：
+```
+static void RR_enqueue(struct run_queue *rq, struct proc_struct *proc) {
+    assert(list_empty(&(proc->run_link)));
+    list_add_before(&(rq->run_list), &(proc->run_link)); //将当前进程放到run_queue的队尾
+    if (proc->time_slice == 0 || proc->time_slice > rq->max_time_slice) {
+        proc->time_slice = rq->max_time_slice; //为新入队进程分配时间片
+    }
+    proc->rq = rq;
+    rq->proc_num++;
+}
+
+static struct proc_struct * RR_pick_next(struct run_queue *rq) {
+    list_entry_t *le = list_next(&(rq->run_list)); //选取队列头出队
+    if (le != &(rq->run_list)) {
+        return le2proc(le, run_link);
+    }
+    return NULL;
+}
+```
+
+当发生时钟中断时用户进程会陷入内核态，会进行中断处理程序处理，减少进程的时间片，如果时间片减少到0则会发生进程的调度。
+
+进程间的切换：1.切换内核栈 2.切换页目录表 3.保存并切换进程上下文（寄存器）
+```
+void proc_run(struct proc_struct *proc) {
+    if (proc != current) {
+        bool intr_flag;
+        struct proc_struct *prev = current, *next = proc;
+        local_intr_save(intr_flag); //关中断
+        {
+            current = proc;
+            load_esp0(next->kstack + KSTACKSIZE); //切换内核栈
+            lcr3(next->cr3); //切换页目录表
+            switch_to(&(prev->context), &(next->context)); //保存并切换进程上下文
+        }
+        local_intr_restore(intr_flag);
+    }
+}
+```
 
 
 
