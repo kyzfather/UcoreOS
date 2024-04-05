@@ -36,3 +36,14 @@ Ucore本身包括操作系统内核的框架代码，个人需要阅读弄清楚
 /kern/schedule: 进程调度的相关代码，实现round-robin调度算法。<br>
 /kern/sync: 主要包含进程同步互斥的相关代码，包括信号量semphore机制的实现。<br>
 /kern/trap: 中断和异常处理的相关代码，定义中断描述符表以及每个中断处理程序的地址，负责处理ucore运行过程中遇到的中断和异常。
+
+## 物理内存管理
+使用Page结构体来管理4KB的物理页
+```
+struct Page {
+    int ref;        // 当前物理页被多少虚拟地址引用
+    uint32_t flags; // 页的状态
+    unsigned int property;// 用于first-fit物理页分配,标志当前空闲块包含的物理页数目
+    list_entry_t page_link;//链表节点，使用双向链表管理空闲物理页
+};
+```
