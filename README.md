@@ -266,6 +266,126 @@ struct proc_struct {
 };
 ```
 
+实现分配进程控制块和初始化的函数alloc_proc:
+```
+static struct proc_struct* alloc_proc(void) {
+    struct proc_struct* proc = kmalloc(sizeof(struct proc_struct));
+    if (proc != NULL) {
+        proc->state = PROC_UNINIT;
+        proc->pid = -1;
+        proc->runs = 0;
+        proc->kstack = 0;
+        proc->need_resched = 0;
+        proc->parent = NULL;
+        proc->mm = NULL;
+        memset(&(proc->context), 0, sizeof(struct context));
+        proc->tf = NULL;
+        proc->cr3 = boot_cr3;
+        proc->flags = 0;
+        memset(proc->name, 0, PROC_NAME_LEN);
+        proc->wait_state = 0;
+        proc->cptr = proc->optr = proc->yptr = NULL;
+        proc->rq = NULL;
+        list_init(&(proc->run_link));
+        proc->time_slice = 0;
+    }
+    return proc;
+}
+```
+
+两个进程地址空间的拷贝，copy_range函数实现（会被fork函数调用）：
+```
+int copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end, bool share) { //将进程A的地址空间(from)拷贝到进程B的地址空间(to)，从进程A的虚拟地址start处开始到end结束
+    assert(start % PGSIZE == 0 && end % PGSIZE == 0);
+    assert(USER_ACCESS(start, end));
+    
+    do {
+        pte_t *ptep = get_pte(from, start, 0), *nptep; //获取进程A的页表项
+        
+        if (ptep == NULL) {
+            start = ROUNDDOWN(start + PTSIZE, PTSIZE);
+            continue;
+        }
+        
+        if (*ptep & PTE_P) {
+            if ((nptep = get_pte(to, start, 1)) == NULL) { //获取进程B的页表项，页表不存在的话会创建页表
+                return -E_NO_MEM;
+            }
+            
+            uint32_t perm = (*ptep & PTE_USER);
+            struct Page *page = pte2page(*ptep); //进程A的物理页
+            struct Page *npage = alloc_page(); //为进程B分配物理页
+            assert(page != NULL);
+            assert(npage != NULL);
+            int ret = 0;
+
+            void *kva_src = page2kva(page);
+            void *kva_dst = page2kva(npage);
+
+            memcpy(kva_dst, kva_src, PGSIZE); //将A的物理页的内容拷贝到B的物理页上
+ 
+            ret = page_insert(to, npage, start, perm); //将虚拟地址到物理地址的映射关系添加到进程B的页映射中
+            assert(ret == 0);
+        }
+        start += PGSIZE;
+    } while (start != 0 && start < end);
+    
+    return 0;
+}
+```
+
+进程的拷贝复制，fork函数实现，核心逻辑代码如下（省略细节）：
+```
+int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
+    int ret = -E_NO_FREE_PROC;
+    struct proc_struct *proc; 
+
+    if (nr_process >= MAX_PROCESS) {
+        goto fork_out;
+    }
+
+    ret = -E_NO_MEM;
+    if ((proc = alloc_proc()) == NULL) { //1.为新的进程分配进程控制块
+        goto fork_out;
+    }
+
+    proc->parent = current; //指向父进程
+    assert(current->wait_state == 0);
+
+    if (setup_kstack(proc) != 0) { //2.分配创建内核栈
+        goto bad_fork_cleanup_proc;
+    }
+
+    if (copy_mm(clone_flags, proc) != 0) { //3.拷贝父进程的地址空间（mm_struct，只有用户进程才有）
+        goto bad_fork_cleanup_kstack;
+    }
+
+    copy_thread(proc, stack, tf); //4.拷贝父进程的上下文信息（运行时寄存器状态）
+
+
+    proc->pid = get_pid();
+
+
+    wakeup_proc(proc); //5.设置进程状态为runnable，添加到就绪队列中
+
+    ret = proc->pid;
+
+fork_out:
+    return ret;
+
+bad_fork_cleanup_kstack:
+    put_kstack(proc);
+    
+bad_fork_cleanup_proc:
+    kfree(proc);
+    goto fork_out;
+}
+```
+
+实现了fork函数后，可以通过内核进程复制出内核线程，也可以实现从一个用户进程复制出另一个用户进程。接下来，需要借助于exec函数，实现加载用户程序并创建用户进程。这里简单描述exec函数的大概原理：<br>
+1. 读取用户程序的elf文件加载到相应虚拟地址处，分配物理页并创建页表映射关系。
+2. 为用户进程分配用户栈。
+3. 设置进程控制块的trapframe中的段选择子为USER_CS，执行该进程时会将段选择子放入到CS段寄存器中。CS低两位代表CPU的权限级别，这里为用户进程分配的权限级别为3的用户级。
 
 
 
