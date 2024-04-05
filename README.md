@@ -448,7 +448,83 @@ void proc_run(struct proc_struct *proc) {
 }
 ```
 
+## 进程间的同步互斥
+Ucore是基于单核CPU的内核代码，在ucore中实现临界区的互斥主要是通过关中断实现，例如：
+```
+local_intr_save(intr_flag);
+{
+  临界区代码
+}
+local_intr_restore(intr_flag);
+```
+开中断核关中断底层都是依靠X86的机器指令cli和sli，设置了eflags寄存器中与中断相关的位。
 
+Ucore中进程间同步主要是基于Semphore信号量机制，具体实现如下：
+```
+typedef struct {
+    int value;
+    wait_queue_t wait_queue;
+} semaphore_t;
+```
+每个信号量都有一个专门的等待队列，还有一个value。当value > 0，表示当前可用资源数量。 value = 0，表示等待队列为空。 value < 0，表示该信号量的等待队列里的进程数。
+
+等待队列的相关定义：
+```
+typedef struct {
+    list_entry_t wait_head;
+} wait_queue_t;
+
+typedef struct {
+    struct proc_struct *proc;
+    uint32_t wakeup_flags;
+    wait_queue_t *wait_queue;
+    list_entry_t wait_link;
+} wait_t;
+```
+等待队列就是一个双向链表，从每个链表节点可以找到对应wait_t结构体，该结构体会存储该链表节点对应的等待进程。
+
+信号量的相关方法up()和down():
+```
+static __noinline void __up(semaphore_t *sem, uint32_t wait_state) {
+    bool intr_flag;
+    local_intr_save(intr_flag);
+    {
+        wait_t *wait;
+        if ((wait = wait_queue_first(&(sem->wait_queue))) == NULL) { //从该信号量的等待队列中获取第一个wait
+            sem->value++;
+        } else {
+            assert(wait->proc->wait_state == wait_state);
+            wakeup_wait(&(sem->wait_queue), wait, wait_state, 1); //唤醒相应的进程
+        }
+    }
+    local_intr_restore(intr_flag);
+}
+
+static __noinline uint32_t __down(semaphore_t *sem, uint32_t wait_state) {
+    bool intr_flag;
+    local_intr_save(intr_flag);
+    if (sem->value > 0) { //如果信号量的值大于0，说明资源充足，获取返回
+        sem->value--;
+        local_intr_restore(intr_flag);
+        return 0;
+    }
+    wait_t __wait, *wait = &__wait;
+    wait_current_set(&(sem->wait_queue), wait, wait_state); //否则加入到等待队列中
+    local_intr_restore(intr_flag);
+
+    schedule(); //阻塞该进程，进程调度
+
+    //进程被唤醒后，执行下面的逻辑。从等待队列中删除
+    local_intr_save(intr_flag);
+    wait_current_del(&(sem->wait_queue), wait); 
+    local_intr_restore(intr_flag);
+
+    if (wait->wakeup_flags != wait_state) {
+        return wait->wakeup_flags;
+    }
+    return 0;
+}
+```
 
 
 
