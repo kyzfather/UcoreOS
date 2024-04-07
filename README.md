@@ -48,9 +48,7 @@ Ucore是基于80386的CPU架构，CPU地址线有32位，可以寻址4GB的物�
 ![段页式映射](段页式映射.png)
 
 ## 特权级级别
-特权级总共有4个，编号从0（最高特权级）到3（最低特权级）。Ucore中使用到了两个特权级，0（内核态）和3（用户态）。当前CPU所处的特权级级别主要体现在CS代码段寄存器中，CS寄存器16位，低两位CPL（current privilege level）代表CPU所处的特权级。<br>
-
-![CS寄存器](CS寄存器.png)
+特权级总共有4个，编号从0（最高特权级）到3（最低特权级）。Ucore中使用到了两个特权级，0（内核态）和3（用户态）。当前CPU所处的特权级级别主要体现在CS代码段寄存器中，CS寄存器16位，低两位CPL（current privilege level）代表CPU所处的特权级。
 
 ## 中断处理
 在Ucore中，没有采用像Linux中那样的中断上下部机制。中断处理的大概流程如下：<br>
@@ -71,6 +69,7 @@ struct Page {
     unsigned int property;       //用于first-fit物理页分配,标志当前空闲块包含的连续物理页数目
     list_entry_t page_link;      //链表节点，用于将Page链接到一个双向链表中
     list_entry_t pra_page_link;  //链表节点，用于页面置换算法，将最新分配的物理页放到FIFO队列尾
+    uintptr_t pra_vaddr;         //物理页对应的虚拟地址，用于页面置换的实现
 };
 ```
 
@@ -245,16 +244,15 @@ int swap_out(struct mm_struct *mm, int n, int in_tick) {
           struct Page *page;
           int r = sm->swap_out_victim(mm, &page, in_tick); //从FIFO队列找到受害者页，地址放到page中
           
-          v = page->pra_vaddr; 
-          pte_t *ptep = get_pte(mm->pgdir, v, 0);
+          v = page->pra_vaddr; //获取该物理页对应的虚拟地址
+          pte_t *ptep = get_pte(mm->pgdir, v, 0); //找到对应的页表项
           assert((*ptep & PTE_P) != 0);
 
           if (swapfs_write((page->pra_vaddr / PGSIZE + 1) << 8, page) != 0) { //受害者页换出到磁盘
                cprintf("SWAP: failed to save\n");
                sm->map_swappable(mm, v, page, 0);
                continue;
-          }
-          else {
+          } else {
                cprintf("swap_out: i %d, store page in vaddr 0x%x to disk swap entry %d\n", i, v, page->pra_vaddr / PGSIZE + 1);
                *ptep = (page->pra_vaddr / PGSIZE + 1) << 8; //修改页表项内容，低24位表示磁盘上该物理页换出的地址
                free_page(page); //释放该物理页
