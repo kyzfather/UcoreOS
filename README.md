@@ -562,3 +562,4 @@ static __noinline uint32_t __down(semaphore_t *sem, uint32_t wait_state) {
 ## To-Do:
 1. 文件系统的实现。
 2. 伙伴系统实现减少内存碎片
+3. 考虑实现用户级的线程管理：协程
